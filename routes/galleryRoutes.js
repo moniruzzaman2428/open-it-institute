@@ -34,10 +34,10 @@ router.post(
   restrictTo('admin'),
   upload.single('image'),
   (req, res, next) => {
-    console.log('========== MULTER DEBUG ==========');
+    console.log('MULTER DEBUG ');
     console.log('BODY:', req.body);
     console.log('FILE:', req.file);
-    console.log('==================================');
+    console.log('some');
     next();
   },
   galleryController.createGalleryItem
