@@ -7,15 +7,29 @@ const gallerySchema = new mongoose.Schema(
       required: true,
       trim: true
     },
+
     image: {
       type: String,
       required: true
     },
+
+    publicId: {
+      type: String,
+      required: true
+    },
+
     category: {
       type: String,
-      enum: ['classroom', 'events', 'workshops', 'students', 'certificate'],
+      enum: [
+        'classroom',
+        'events',
+        'workshops',
+        'students',
+        'certificate'
+      ],
       default: 'classroom'
     },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
