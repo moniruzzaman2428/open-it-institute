@@ -24,4 +24,10 @@ router.patch(
   attendanceController.updateAttendance
 );
 
+router.delete(
+  '/:id',
+  restrictTo('admin'),
+  attendanceController.deleteAttendance
+);
+
 module.exports = router;

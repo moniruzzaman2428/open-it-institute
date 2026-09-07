@@ -33,14 +33,16 @@ router.post(
   protect,
   restrictTo('admin'),
   upload.single('image'),
-  (req, res, next) => {
-    console.log('MULTER DEBUG ');
-    console.log('BODY:', req.body);
-    console.log('FILE:', req.file);
-    console.log('some');
-    next();
-  },
   galleryController.createGalleryItem
+);
+
+
+router.patch(
+  '/:id',
+  protect,
+  restrictTo('admin'),
+  upload.single('image'),
+  galleryController.updateGalleryItem
 );
 
 

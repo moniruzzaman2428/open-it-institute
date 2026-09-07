@@ -180,3 +180,30 @@ exports.revokeCertificate = catchAsync(async (req, res, next) => {
     data: { certificate }
   });
 });
+
+exports.updateCertificate = catchAsync(async (req, res, next) => {
+  const certificate = await Certificate.findById(req.params.id);
+  if (!certificate) return next(new AppError('Certificate not found.', 404));
+
+  ['completionDate', 'duration', 'status'].forEach((field) => {
+    if (req.body[field] !== undefined) certificate[field] = req.body[field];
+  });
+
+  await certificate.save();
+  await certificate.populate('student', 'name studentId');
+  await certificate.populate('course', 'title duration');
+  await certificate.populate('issuedBy', 'name');
+
+  res.status(200).json({
+    success: true,
+    message: 'Certificate updated successfully.',
+    data: { certificate },
+  });
+});
+
+exports.deleteCertificate = catchAsync(async (req, res, next) => {
+  const certificate = await Certificate.findByIdAndDelete(req.params.id);
+  if (!certificate) return next(new AppError('Certificate not found.', 404));
+
+  res.status(200).json({ success: true, message: 'Certificate deleted successfully.' });
+});

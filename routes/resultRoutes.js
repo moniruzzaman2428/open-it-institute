@@ -6,12 +6,15 @@ const router = express.Router();
 
 router.use(protect);
 
+router.get('/student/:studentId', restrictTo('admin', 'teacher', 'student'), resultController.getResultsByStudentId);
+
 router
   .route('/')
   .get(restrictTo('admin', 'teacher', 'student'), resultController.getResults)
   .post(restrictTo('admin', 'teacher'), resultController.createResult);
 
 router.patch('/:id', restrictTo('admin', 'teacher'), resultController.updateResult);
+router.delete('/:id', restrictTo('admin', 'teacher'), resultController.deleteResult);
 
 router.post(
   '/publish/:examId',

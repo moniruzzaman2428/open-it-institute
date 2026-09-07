@@ -25,7 +25,7 @@ app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 
 // Rate limiting for auth routes
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 20,
   message: {
     success: false,
@@ -80,6 +80,9 @@ app.use('/api/gallery', require('./routes/galleryRoutes'));
 app.use('/api/testimonials', require('./routes/testimonialRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
 app.use('/api/settings', require('./routes/settingsRoutes'));
+
+// ✅ IMPORTANT: Dashboard route যোগ করুন
+app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 
 // 404 handler
 app.all('*', (req, res, next) => {

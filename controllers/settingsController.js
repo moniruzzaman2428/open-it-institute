@@ -1,11 +1,28 @@
 const WebsiteSettings = require('../models/WebsiteSettings');
 const catchAsync = require('../utils/catchAsync');
-const AppError = require('../utils/AppError');
 
-exports.getSettings = catchAsync(async (req, res, next) => {
-  res.status(501).json({ success: false, message: 'Get Settings - Coming soon' });
+exports.getSettings = catchAsync(async (req, res) => {
+  const settings = await WebsiteSettings.getSettings();
+  res.status(200).json({ success: true, data: { settings } });
 });
 
-exports.updateSettings = catchAsync(async (req, res, next) => {
-  res.status(501).json({ success: false, message: 'Update Settings - Coming soon' });
+exports.updateSettings = catchAsync(async (req, res) => {
+  const settings = await WebsiteSettings.getSettings();
+  const allowedFields = [
+    'instituteName', 'logo', 'favicon', 'phone', 'email', 'address',
+    'facebookUrl', 'youtubeUrl', 'googleMap', 'heroHeadline',
+    'heroSubheadline', 'aboutText', 'mission', 'vision', 'footerText',
+    'totalStudents', 'totalCourses', 'totalTeachers', 'successfulStudents',
+  ];
+
+  allowedFields.forEach((field) => {
+    if (req.body[field] !== undefined) settings[field] = req.body[field];
+  });
+
+  await settings.save();
+  res.status(200).json({
+    success: true,
+    message: 'Website settings updated successfully.',
+    data: { settings },
+  });
 });

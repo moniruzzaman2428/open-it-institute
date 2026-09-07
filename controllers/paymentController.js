@@ -137,6 +137,9 @@ exports.createPayment = catchAsync(async (req, res, next) => {
   // Calculate fee summary
   const courseDoc = await Course.findById(course);
   if (!courseDoc) return next(new AppError('Course not found.', 404));
+  if (!studentDoc.course || String(studentDoc.course._id || studentDoc.course) !== String(courseDoc._id)) {
+    return next(new AppError('This student is not enrolled in the selected course.', 400));
+  }
 
   const totalFee = courseDoc.discount > 0
     ? Math.round(courseDoc.fee - (courseDoc.fee * courseDoc.discount) / 100)
@@ -198,4 +201,73 @@ exports.createPayment = catchAsync(async (req, res, next) => {
       }
     }
   });
+});
+
+// ======================
+// Recalculate payment snapshots for a student/course ledger
+// ======================
+const recalculatePaymentLedger = async (studentId, courseId) => {
+  const course = await Course.findById(courseId);
+  if (!course) return;
+
+  const totalFee = course.discount > 0
+    ? Math.round(course.fee - (course.fee * course.discount) / 100)
+    : course.fee;
+
+  const payments = await Payment.find({ student: studentId, course: courseId })
+    .sort('paymentDate createdAt');
+
+  let cumulative = 0;
+  for (const payment of payments) {
+    if (payment.status !== 'cancelled') cumulative += Number(payment.amount) || 0;
+    payment.totalFee = totalFee;
+    payment.paidAmount = cumulative;
+    payment.dueAmount = Math.max(totalFee - cumulative, 0);
+    if (payment.status !== 'cancelled') {
+      payment.status = payment.dueAmount > 0 ? 'partial' : 'paid';
+    }
+    await payment.save();
+  }
+};
+
+exports.updatePayment = catchAsync(async (req, res, next) => {
+  const payment = await Payment.findById(req.params.id);
+  if (!payment) return next(new AppError('Payment not found.', 404));
+
+  const oldStudent = payment.student;
+  const oldCourse = payment.course;
+  const allowedFields = ['amount', 'paymentMethod', 'transactionId', 'paymentDate', 'remarks', 'status'];
+
+  allowedFields.forEach((field) => {
+    if (req.body[field] !== undefined) payment[field] = req.body[field];
+  });
+
+  if (payment.amount !== undefined && Number(payment.amount) <= 0) {
+    return next(new AppError('Payment amount must be greater than 0.', 400));
+  }
+
+  await payment.save();
+  await recalculatePaymentLedger(oldStudent, oldCourse);
+
+  const updated = await Payment.findById(payment._id)
+    .populate('student', 'name studentId phone')
+    .populate('course', 'title fee discount')
+    .populate('receivedBy', 'name');
+
+  res.status(200).json({
+    success: true,
+    message: 'Payment updated successfully.',
+    data: { payment: updated },
+  });
+});
+
+exports.deletePayment = catchAsync(async (req, res, next) => {
+  const payment = await Payment.findById(req.params.id);
+  if (!payment) return next(new AppError('Payment not found.', 404));
+
+  const { student, course } = payment;
+  await Payment.findByIdAndDelete(payment._id);
+  await recalculatePaymentLedger(student, course);
+
+  res.status(200).json({ success: true, message: 'Payment deleted successfully.' });
 });

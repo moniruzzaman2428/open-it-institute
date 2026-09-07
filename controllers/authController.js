@@ -157,8 +157,8 @@ exports.getMe = catchAsync(async (req, res, next) => {
   if (user.role === 'teacher') {
     const Teacher = require('../models/Teacher');
     profile = await Teacher.findOne({ userId: user._id })
-      .populate('assignedCourses', 'title slug')
-      .populate('assignedBatches', 'name time');
+      .populate('assignedCourses', 'title slug duration fee status')
+      .populate({ path: 'assignedBatches', select: 'name time days room status currentStudents maximumStudents course', populate: { path: 'course', select: 'title slug duration' } });
   }
 
   res.status(200).json({
@@ -176,6 +176,66 @@ exports.getMe = catchAsync(async (req, res, next) => {
       },
       profile
     }
+  });
+});
+
+// ======================
+// UPDATE CURRENT USER
+// ======================
+exports.updateMe = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user.id);
+  if (!user) return next(new AppError('User not found.', 404));
+
+  const { name, email, phone, profileImage } = req.body;
+
+  if (email !== undefined) {
+    const normalized = String(email).toLowerCase().trim();
+    const duplicate = await User.findOne({ email: normalized, _id: { $ne: user._id } });
+    if (duplicate) return next(new AppError('Email is already in use.', 409));
+    user.email = normalized;
+  }
+
+  if (phone !== undefined) {
+    const normalized = String(phone).trim();
+    const duplicate = await User.findOne({ phone: normalized, _id: { $ne: user._id } });
+    if (duplicate) return next(new AppError('Phone number is already in use.', 409));
+    user.phone = normalized;
+  }
+
+  if (name !== undefined) user.name = String(name).trim();
+  if (profileImage !== undefined) user.profileImage = profileImage;
+
+  await user.save({ validateBeforeSave: false });
+
+  if (user.role === 'student') {
+    await Student.findOneAndUpdate(
+      { userId: user._id },
+      { name: user.name, email: user.email, phone: user.phone, photo: user.profileImage },
+      { runValidators: false }
+    );
+  } else if (user.role === 'teacher') {
+    const Teacher = require('../models/Teacher');
+    await Teacher.findOneAndUpdate(
+      { userId: user._id },
+      { name: user.name, email: user.email, phone: user.phone, photo: user.profileImage },
+      { runValidators: false }
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    message: 'Profile updated successfully.',
+    data: {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        profileImage: user.profileImage,
+        status: user.status,
+      },
+    },
   });
 });
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const teacherController = require('../controllers/teacherController');
 const { protect, restrictTo } = require('../middleware/auth');
+const upload = require('../middleware/upload');
 
 const router = express.Router();
 
@@ -10,12 +11,12 @@ router.use(restrictTo('admin'));
 router
   .route('/')
   .get(teacherController.getAllTeachers)
-  .post(teacherController.createTeacher);
+  .post(upload.single('photo'), teacherController.createTeacher);
 
 router
   .route('/:id')
   .get(teacherController.getTeacher)
-  .patch(teacherController.updateTeacher)
+  .patch(upload.single('photo'), teacherController.updateTeacher)
   .delete(teacherController.deleteTeacher);
 
 module.exports = router;

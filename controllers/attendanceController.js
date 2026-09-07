@@ -240,3 +240,17 @@ exports.updateAttendance = catchAsync(async (req, res, next) => {
     data: { attendance }
   });
 });
+
+
+// ======================
+// Delete attendance (Admin)
+// ======================
+exports.deleteAttendance = catchAsync(async (req, res, next) => {
+  const attendance = await Attendance.findByIdAndDelete(req.params.id);
+  if (!attendance) return next(new AppError('Attendance record not found.', 404));
+
+  res.status(200).json({
+    success: true,
+    message: 'Attendance record deleted successfully.',
+  });
+});

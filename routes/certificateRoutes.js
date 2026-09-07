@@ -21,4 +21,9 @@ router.patch(
   certificateController.revokeCertificate
 );
 
+router
+  .route('/:id')
+  .patch(restrictTo('admin'), certificateController.updateCertificate)
+  .delete(restrictTo('admin'), certificateController.deleteCertificate);
+
 module.exports = router;

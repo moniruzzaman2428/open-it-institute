@@ -18,6 +18,10 @@ router
   .get(restrictTo('admin', 'student'), paymentController.getAllPayments)
   .post(restrictTo('admin'), paymentController.createPayment);
 
-router.get('/:id', restrictTo('admin', 'student'), paymentController.getPayment);
+router
+  .route('/:id')
+  .get(restrictTo('admin', 'student'), paymentController.getPayment)
+  .patch(restrictTo('admin'), paymentController.updatePayment)
+  .delete(restrictTo('admin'), paymentController.deletePayment);
 
 module.exports = router;

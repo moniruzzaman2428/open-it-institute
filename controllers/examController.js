@@ -62,6 +62,9 @@ exports.createExam = catchAsync(async (req, res, next) => {
 
   const batchDoc = await Batch.findById(batch);
   if (!batchDoc) return next(new AppError('Batch not found.', 404));
+  if (String(batchDoc.course) !== String(course)) {
+    return next(new AppError('Selected batch does not belong to the selected course.', 400));
+  }
 
   const exam = await Exam.create({
     title,

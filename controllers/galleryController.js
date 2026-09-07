@@ -138,3 +138,37 @@ exports.deleteGalleryItem = catchAsync(async (req, res, next) => {
   });
 
 });
+// ===============================
+// UPDATE GALLERY ITEM
+// ===============================
+exports.updateGalleryItem = catchAsync(async (req, res, next) => {
+  const item = await Gallery.findById(req.params.id);
+  if (!item) return next(new AppError('Gallery item not found.', 404));
+
+  if (req.body.title !== undefined) item.title = req.body.title;
+  if (req.body.category !== undefined) item.category = req.body.category;
+
+  if (req.file) {
+    const uploaded = await uploadToCloudinary(
+      req.file.buffer,
+      'open-it-institute/gallery'
+    );
+
+    const oldPublicId = item.publicId;
+    item.image = uploaded.secure_url;
+    item.publicId = uploaded.public_id;
+
+    if (oldPublicId) {
+      await cloudinary.uploader.destroy(oldPublicId).catch(() => {});
+    }
+  }
+
+  await item.save();
+  await item.populate('createdBy', 'name');
+
+  res.status(200).json({
+    success: true,
+    message: 'Gallery item updated successfully.',
+    data: { item },
+  });
+});

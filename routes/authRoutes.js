@@ -21,6 +21,7 @@ router.post('/reset-password', resetPasswordValidation, validate, authController
 // Protected routes
 router.use(protect);
 router.get('/me', authController.getMe);
+router.patch('/me', authController.updateMe);
 router.patch('/change-password', changePasswordValidation, validate, authController.changePassword);
 
 module.exports = router;

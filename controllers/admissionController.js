@@ -9,6 +9,62 @@ const APIFeatures = require('../utils/apiFeatures');
 const { generateApplicationId, generateStudentId } = require('../utils/generateId');
 
 // ======================
+// HELPER: Validate Batch
+// ======================
+const getValidBatchForCourse = async (batchId, courseId) => {
+  // যদি batchId না থাকে, তাহলে available batch খুঁজুন
+  if (!batchId) {
+    const availableBatch = await Batch.findOne({
+      course: courseId,
+      status: { $in: ['upcoming', 'ongoing'] },
+      $expr: { $lt: ['$currentStudents', '$maximumStudents'] }
+    }).populate('teacher', 'name');
+
+    if (!availableBatch) {
+      throw new AppError(
+        'No available batch found for this course. Please create a batch with a teacher assigned first.',
+        400
+      );
+    }
+
+    return availableBatch;
+  }
+
+  // Validate provided batch ID
+  if (!batchId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new AppError('Invalid batch ID format.', 400);
+  }
+
+  const batch = await Batch.findById(batchId).populate('teacher', 'name');
+  
+  if (!batch) {
+    throw new AppError('Selected batch not found.', 404);
+  }
+
+  // ✅ Check if batch belongs to the course
+  if (String(batch.course) !== String(courseId)) {
+    throw new AppError('Selected batch does not belong to the selected course.', 400);
+  }
+
+  // ✅ Check if batch has a teacher assigned
+  if (!batch.teacher) {
+    throw new AppError('Selected batch does not have a teacher assigned. Please assign a teacher first.', 400);
+  }
+
+  // ✅ Check batch status
+  if (['completed', 'cancelled'].includes(batch.status)) {
+    throw new AppError('Selected batch is not open for admission.', 400);
+  }
+
+  // ✅ Check if batch is full
+  if (batch.currentStudents >= batch.maximumStudents) {
+    throw new AppError('Selected batch is already full. Maximum capacity: ' + batch.maximumStudents, 400);
+  }
+
+  return batch;
+};
+
+// ======================
 // PUBLIC: Submit Admission
 // ======================
 exports.createAdmission = catchAsync(async (req, res, next) => {
@@ -22,7 +78,7 @@ exports.createAdmission = catchAsync(async (req, res, next) => {
     email,
     address,
     education,
-    course, // can be course ID or slug
+    course,
     batch,
     photo
   } = req.body;
@@ -42,6 +98,11 @@ exports.createAdmission = catchAsync(async (req, res, next) => {
 
   if (!courseDoc) {
     return next(new AppError('Selected course not found.', 404));
+  }
+
+  // Validate batch if provided
+  if (batch) {
+    await getValidBatchForCourse(batch, courseDoc._id);
   }
 
   // Check for existing pending application with same phone/email
@@ -135,7 +196,7 @@ exports.getAllAdmissions = catchAsync(async (req, res, next) => {
 exports.getAdmission = catchAsync(async (req, res, next) => {
   const admission = await Admission.findById(req.params.id)
     .populate('course', 'title slug fee duration')
-    .populate('batch', 'name time days')
+    .populate('batch', 'name time days teacher')
     .populate('reviewedBy', 'name email');
 
   if (!admission) {
@@ -167,6 +228,56 @@ exports.updateAdmission = catchAsync(async (req, res, next) => {
 
   // ========== APPROVE ==========
   if (status === 'approved') {
+    // Resolve and validate the batch
+    let batchDoc = null;
+    let batchId = batch || admission.batch;
+
+    try {
+      // Try to get valid batch
+      batchDoc = await getValidBatchForCourse(batchId, admission.course._id);
+      batchId = batchDoc._id;
+    } catch (error) {
+      // If no batch found or invalid, try to find any available batch
+      console.log('Batch validation failed:', error.message);
+      
+      // Find any available batch for this course
+      batchDoc = await Batch.findOne({
+        course: admission.course._id,
+        status: { $in: ['upcoming', 'ongoing'] },
+        $expr: { $lt: ['$currentStudents', '$maximumStudents'] }
+      }).populate('teacher', 'name');
+
+      if (!batchDoc) {
+        return next(new AppError(
+          'No available batch found for this course. Please create a batch with a teacher assigned first.',
+          400
+        ));
+      }
+
+      // ✅ Check if the found batch has a teacher
+      if (!batchDoc.teacher) {
+        return next(new AppError(
+          'The available batch does not have a teacher assigned. Please assign a teacher to the batch first.',
+          400
+        ));
+      }
+
+      batchId = batchDoc._id;
+    }
+
+    // Final check - ensure batch has teacher
+    const finalBatch = await Batch.findById(batchId).populate('teacher', 'name');
+    if (!finalBatch) {
+      return next(new AppError('Batch not found.', 404));
+    }
+
+    if (!finalBatch.teacher) {
+      return next(new AppError(
+        'Batch does not have a teacher assigned. Please assign a teacher to the batch before approving.',
+        400
+      ));
+    }
+
     // Check if user already exists
     let user = await User.findOne({
       $or: [{ email: admission.email }, { phone: admission.phone }]
@@ -200,24 +311,6 @@ exports.updateAdmission = catchAsync(async (req, res, next) => {
     let student = await Student.findOne({ userId: user._id });
 
     if (!student) {
-      // Need a batch - use provided or find first available
-      let batchId = batch || admission.batch;
-
-      if (!batchId) {
-        // Find any batch for this course
-        const availableBatch = await Batch.findOne({
-          course: admission.course._id,
-          status: { $in: ['upcoming', 'ongoing'] }
-        });
-        if (availableBatch) {
-          batchId = availableBatch._id;
-        }
-      }
-
-      if (!batchId) {
-        return next(new AppError('Please assign a batch before approving. No available batch found for this course.', 400));
-      }
-
       student = await Student.create({
         userId: user._id,
         studentId,
@@ -245,7 +338,7 @@ exports.updateAdmission = catchAsync(async (req, res, next) => {
     admission.reviewedBy = req.user.id;
     admission.reviewedAt = new Date();
     admission.remarks = remarks || 'Application approved';
-    if (batch) admission.batch = batch;
+    admission.batch = batchId;
     await admission.save();
 
     return res.status(200).json({
@@ -279,7 +372,13 @@ exports.updateAdmission = catchAsync(async (req, res, next) => {
 
   // ========== GENERAL UPDATE ==========
   if (remarks !== undefined) admission.remarks = remarks;
-  if (batch) admission.batch = batch;
+  if (batch) {
+    if (admission.status !== 'pending') {
+      return next(new AppError('Change the student batch from the Students module after an admission is processed.', 400));
+    }
+    await getValidBatchForCourse(batch, admission.course._id);
+    admission.batch = batch;
+  }
   await admission.save();
 
   res.status(200).json({

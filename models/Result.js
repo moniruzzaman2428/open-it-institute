@@ -51,19 +51,30 @@ const resultSchema = new mongoose.Schema(
 // Unique result per student per exam
 resultSchema.index({ student: 1, exam: 1 }, { unique: true });
 
-// Auto calculate grade
-resultSchema.pre('validate', function (next) {
-  const marks = this.marks;
-  if (marks >= 80) this.grade = 'A+';
-  else if (marks >= 70) this.grade = 'A';
-  else if (marks >= 60) this.grade = 'A-';
-  else if (marks >= 50) this.grade = 'B';
-  else if (marks >= 40) this.grade = 'C';
-  else if (marks >= 33) this.grade = 'D';
+// Auto calculate grade from percentage and pass/fail from the exam's passing mark.
+resultSchema.pre('validate', async function () {
+  const marks = Number(this.marks) || 0;
+  let exam = this.exam;
+
+  if (!exam || typeof exam !== 'object' || exam.totalMarks === undefined) {
+    exam = this.exam
+      ? await mongoose.model('Exam').findById(this.exam).select('totalMarks passingMarks').lean()
+      : null;
+  }
+
+  const totalMarks = Number(exam?.totalMarks) || 100;
+  const passingMarks = Number(exam?.passingMarks ?? 33);
+  const percentage = totalMarks > 0 ? (marks / totalMarks) * 100 : 0;
+
+  if (percentage >= 80) this.grade = 'A+';
+  else if (percentage >= 70) this.grade = 'A';
+  else if (percentage >= 60) this.grade = 'A-';
+  else if (percentage >= 50) this.grade = 'B';
+  else if (percentage >= 40) this.grade = 'C';
+  else if (percentage >= 33) this.grade = 'D';
   else this.grade = 'F';
 
-  this.status = marks >= 33 ? 'pass' : 'fail';
-  next();
+  this.status = marks >= passingMarks ? 'pass' : 'fail';
 });
 
 module.exports = mongoose.model('Result', resultSchema);

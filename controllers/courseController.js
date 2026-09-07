@@ -102,6 +102,7 @@ exports.updateCourse = catchAsync(async (req, res, next) => {
     return next(new AppError('Course not found.', 404));
   }
 
+  const oldTitle = course.title;
   const allowedFields = ['title', 'description', 'duration', 'classHours', 'fee', 'discount', 'instructor', 'curriculum', 'requirements', 'benefits', 'image', 'status'];
 
   allowedFields.forEach((field) => {
@@ -111,7 +112,7 @@ exports.updateCourse = catchAsync(async (req, res, next) => {
   });
 
   // Regenerate slug if title changed
-  if (req.body.title && req.body.title !== course.title) {
+  if (req.body.title && req.body.title !== oldTitle) {
     let newSlug = generateSlug(req.body.title);
     const existing = await Course.findOne({ slug: newSlug, _id: { $ne: course._id } });
     if (existing) {
