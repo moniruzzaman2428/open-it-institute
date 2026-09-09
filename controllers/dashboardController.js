@@ -15,8 +15,8 @@ exports.getAdminDashboard = catchAsync(async (req, res) => {
     const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const growthStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
 
-    console.log('📊 Fetching dashboard data...');
-    console.log('Growth start:', growthStart);
+    // console.log('📊 Fetching dashboard data...');
+    // console.log('Growth start:', growthStart);
 
     // Parallel queries with error handling for each
     const [
@@ -178,9 +178,9 @@ exports.getAdminDashboard = catchAsync(async (req, res) => {
       recentPayments: cleanPayments,
     };
 
-    console.log('✅ Dashboard data fetched successfully');
-    console.log('📈 Student growth data points:', studentGrowth.length);
-    console.log('📋 Recent admissions:', cleanAdmissions.length);
+    // console.log('✅ Dashboard data fetched successfully');
+    // console.log('📈 Student growth data points:', studentGrowth.length);
+    // console.log('📋 Recent admissions:', cleanAdmissions.length);
 
     res.status(200).json({
       success: true,

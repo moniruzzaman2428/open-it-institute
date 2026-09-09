@@ -1,405 +1,1269 @@
+const mongoose = require('mongoose');
+
 const Admission = require('../models/Admission');
 const User = require('../models/User');
 const Student = require('../models/Student');
 const Course = require('../models/Course');
 const Batch = require('../models/Batch');
+
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const APIFeatures = require('../utils/apiFeatures');
-const { generateApplicationId, generateStudentId } = require('../utils/generateId');
 
-// ======================
+const {
+  generateApplicationId,
+  generateStudentId,
+} = require('../utils/generateId');
+
+
+// =========================================================
+// HELPER: Check ObjectId
+// =========================================================
+
+const isValidObjectId = (id) => {
+  return mongoose.Types.ObjectId.isValid(id);
+};
+
+
+// =========================================================
 // HELPER: Validate Batch
-// ======================
+// =========================================================
+// এখানে batchId না থাকলে কোনো batch auto-select করা হবে না.
+// Batch অবশ্যই Admin-এর selected batch হতে হবে.
+// =========================================================
+
 const getValidBatchForCourse = async (batchId, courseId) => {
-  // যদি batchId না থাকে, তাহলে available batch খুঁজুন
+
+  // -------------------------------------------------------
+  // Batch is required
+  // -------------------------------------------------------
+
   if (!batchId) {
-    const availableBatch = await Batch.findOne({
-      course: courseId,
-      status: { $in: ['upcoming', 'ongoing'] },
-      $expr: { $lt: ['$currentStudents', '$maximumStudents'] }
-    }).populate('teacher', 'name');
-
-    if (!availableBatch) {
-      throw new AppError(
-        'No available batch found for this course. Please create a batch with a teacher assigned first.',
-        400
-      );
-    }
-
-    return availableBatch;
+    throw new AppError(
+      'Please select a batch before approving this admission.',
+      400
+    );
   }
 
-  // Validate provided batch ID
-  if (!batchId.match(/^[0-9a-fA-F]{24}$/)) {
-    throw new AppError('Invalid batch ID format.', 400);
+
+  // -------------------------------------------------------
+  // Validate Batch ID
+  // -------------------------------------------------------
+
+  if (!isValidObjectId(batchId)) {
+    throw new AppError(
+      'Invalid batch ID format.',
+      400
+    );
   }
 
-  const batch = await Batch.findById(batchId).populate('teacher', 'name');
-  
+
+  // -------------------------------------------------------
+  // Find Batch
+  // -------------------------------------------------------
+
+  const batch = await Batch.findById(batchId)
+    .populate('teacher', 'name email');
+
+
   if (!batch) {
-    throw new AppError('Selected batch not found.', 404);
+    throw new AppError(
+      'Selected batch not found.',
+      404
+    );
   }
 
-  // ✅ Check if batch belongs to the course
-  if (String(batch.course) !== String(courseId)) {
-    throw new AppError('Selected batch does not belong to the selected course.', 400);
+
+  // -------------------------------------------------------
+  // Check Course
+  // -------------------------------------------------------
+
+  if (
+    String(batch.course) !==
+    String(courseId)
+  ) {
+    throw new AppError(
+      'Selected batch does not belong to the selected course.',
+      400
+    );
   }
 
-  // ✅ Check if batch has a teacher assigned
+
+  // -------------------------------------------------------
+  // Check Batch Status
+  // -------------------------------------------------------
+
+  if (
+    !['upcoming', 'ongoing'].includes(batch.status)
+  ) {
+    throw new AppError(
+      'Selected batch is not open for admission.',
+      400
+    );
+  }
+
+
+  // -------------------------------------------------------
+  // Check Teacher
+  // -------------------------------------------------------
+
   if (!batch.teacher) {
-    throw new AppError('Selected batch does not have a teacher assigned. Please assign a teacher first.', 400);
+    throw new AppError(
+      'Selected batch does not have a teacher assigned. Please assign a teacher first.',
+      400
+    );
   }
 
-  // ✅ Check batch status
-  if (['completed', 'cancelled'].includes(batch.status)) {
-    throw new AppError('Selected batch is not open for admission.', 400);
+
+  // -------------------------------------------------------
+  // Check Capacity
+  // -------------------------------------------------------
+
+  const currentStudents =
+    Number(batch.currentStudents || 0);
+
+  const maximumStudents =
+    Number(batch.maximumStudents || 0);
+
+
+  if (
+    maximumStudents > 0 &&
+    currentStudents >= maximumStudents
+  ) {
+    throw new AppError(
+      `Selected batch is already full. Maximum capacity: ${maximumStudents}.`,
+      400
+    );
   }
 
-  // ✅ Check if batch is full
-  if (batch.currentStudents >= batch.maximumStudents) {
-    throw new AppError('Selected batch is already full. Maximum capacity: ' + batch.maximumStudents, 400);
-  }
 
   return batch;
 };
 
-// ======================
-// PUBLIC: Submit Admission
-// ======================
-exports.createAdmission = catchAsync(async (req, res, next) => {
-  const {
-    studentName,
-    fatherName,
-    motherName,
-    dateOfBirth,
-    gender,
-    phone,
-    email,
-    address,
-    education,
-    course,
-    batch,
-    photo
-  } = req.body;
 
-  // Validate required fields
-  if (!studentName || !fatherName || !motherName || !dateOfBirth || !gender || !phone || !email || !address || !education || !course) {
-    return next(new AppError('Please fill all required fields.', 400));
-  }
+// =========================================================
+// PUBLIC: CREATE ADMISSION
+// =========================================================
 
-  // Find course by ID or slug
-  let courseDoc = null;
-  if (course.match(/^[0-9a-fA-F]{24}$/)) {
-    courseDoc = await Course.findById(course);
-  } else {
-    courseDoc = await Course.findOne({ slug: course });
-  }
+exports.createAdmission = catchAsync(
+  async (req, res, next) => {
 
-  if (!courseDoc) {
-    return next(new AppError('Selected course not found.', 404));
-  }
+    const {
+      studentName,
+      fatherName,
+      motherName,
+      dateOfBirth,
+      gender,
+      phone,
+      email,
+      address,
+      education,
+      course,
+      batch,
+      photo,
+    } = req.body;
 
-  // Validate batch if provided
-  if (batch) {
-    await getValidBatchForCourse(batch, courseDoc._id);
-  }
 
-  // Check for existing pending application with same phone/email
-  const existing = await Admission.findOne({
-    $or: [{ phone }, { email: email.toLowerCase() }],
-    status: 'pending'
-  });
+    // -----------------------------------------------------
+    // Validate Required Fields
+    // -----------------------------------------------------
 
-  if (existing) {
-    return next(new AppError('You already have a pending application. Please wait for review.', 400));
-  }
-
-  // Generate unique Application ID
-  let applicationId;
-  let isUnique = false;
-  while (!isUnique) {
-    applicationId = generateApplicationId();
-    const exists = await Admission.findOne({ applicationId });
-    if (!exists) isUnique = true;
-  }
-
-  const admission = await Admission.create({
-    applicationId,
-    studentName,
-    fatherName,
-    motherName,
-    dateOfBirth,
-    gender,
-    phone,
-    email: email.toLowerCase(),
-    address,
-    education,
-    course: courseDoc._id,
-    batch: batch || undefined,
-    photo: photo || '',
-    status: 'pending'
-  });
-
-  // Populate course for response
-  await admission.populate('course', 'title slug');
-
-  res.status(201).json({
-    success: true,
-    message: 'Admission application submitted successfully!',
-    data: {
-      applicationId: admission.applicationId,
-      studentName: admission.studentName,
-      course: admission.course?.title,
-      status: admission.status,
-      appliedAt: admission.appliedAt
-    }
-  });
-});
-
-// ======================
-// ADMIN: Get All Admissions
-// ======================
-exports.getAllAdmissions = catchAsync(async (req, res, next) => {
-  const features = new APIFeatures(
-    Admission.find()
-      .populate('course', 'title slug')
-      .populate('batch', 'name time')
-      .populate('reviewedBy', 'name'),
-    req.query
-  )
-    .filter()
-    .search(['studentName', 'phone', 'email', 'applicationId'])
-    .sort()
-    .paginate();
-
-  const admissions = await features.query;
-  const total = await Admission.countDocuments();
-
-  // Count by status
-  const pending = await Admission.countDocuments({ status: 'pending' });
-  const approved = await Admission.countDocuments({ status: 'approved' });
-  const rejected = await Admission.countDocuments({ status: 'rejected' });
-
-  res.status(200).json({
-    success: true,
-    results: admissions.length,
-    total,
-    stats: { pending, approved, rejected },
-    data: { admissions }
-  });
-});
-
-// ======================
-// ADMIN: Get Single Admission
-// ======================
-exports.getAdmission = catchAsync(async (req, res, next) => {
-  const admission = await Admission.findById(req.params.id)
-    .populate('course', 'title slug fee duration')
-    .populate('batch', 'name time days teacher')
-    .populate('reviewedBy', 'name email');
-
-  if (!admission) {
-    return next(new AppError('Admission application not found.', 404));
-  }
-
-  res.status(200).json({
-    success: true,
-    data: { admission }
-  });
-});
-
-// ======================
-// ADMIN: Update / Approve / Reject
-// ======================
-exports.updateAdmission = catchAsync(async (req, res, next) => {
-  const { status, remarks, batch } = req.body;
-
-  const admission = await Admission.findById(req.params.id).populate('course');
-
-  if (!admission) {
-    return next(new AppError('Admission application not found.', 404));
-  }
-
-  // If already processed
-  if (admission.status !== 'pending' && status) {
-    return next(new AppError(`This application is already ${admission.status}.`, 400));
-  }
-
-  // ========== APPROVE ==========
-  if (status === 'approved') {
-    // Resolve and validate the batch
-    let batchDoc = null;
-    let batchId = batch || admission.batch;
-
-    try {
-      // Try to get valid batch
-      batchDoc = await getValidBatchForCourse(batchId, admission.course._id);
-      batchId = batchDoc._id;
-    } catch (error) {
-      // If no batch found or invalid, try to find any available batch
-      console.log('Batch validation failed:', error.message);
-      
-      // Find any available batch for this course
-      batchDoc = await Batch.findOne({
-        course: admission.course._id,
-        status: { $in: ['upcoming', 'ongoing'] },
-        $expr: { $lt: ['$currentStudents', '$maximumStudents'] }
-      }).populate('teacher', 'name');
-
-      if (!batchDoc) {
-        return next(new AppError(
-          'No available batch found for this course. Please create a batch with a teacher assigned first.',
+    if (
+      !studentName ||
+      !fatherName ||
+      !motherName ||
+      !dateOfBirth ||
+      !gender ||
+      !phone ||
+      !email ||
+      !address ||
+      !education ||
+      !course
+    ) {
+      return next(
+        new AppError(
+          'Please fill all required fields.',
           400
-        ));
-      }
-
-      // ✅ Check if the found batch has a teacher
-      if (!batchDoc.teacher) {
-        return next(new AppError(
-          'The available batch does not have a teacher assigned. Please assign a teacher to the batch first.',
-          400
-        ));
-      }
-
-      batchId = batchDoc._id;
+        )
+      );
     }
 
-    // Final check - ensure batch has teacher
-    const finalBatch = await Batch.findById(batchId).populate('teacher', 'name');
-    if (!finalBatch) {
-      return next(new AppError('Batch not found.', 404));
+
+    // -----------------------------------------------------
+    // Find Course
+    // -----------------------------------------------------
+
+    let courseDoc = null;
+
+
+    if (isValidObjectId(course)) {
+
+      courseDoc =
+        await Course.findById(course);
+
+    } else {
+
+      courseDoc =
+        await Course.findOne({
+          slug: course,
+        });
+
     }
 
-    if (!finalBatch.teacher) {
-      return next(new AppError(
-        'Batch does not have a teacher assigned. Please assign a teacher to the batch before approving.',
-        400
-      ));
+
+    if (!courseDoc) {
+      return next(
+        new AppError(
+          'Selected course not found.',
+          404
+        )
+      );
     }
 
-    // Check if user already exists
-    let user = await User.findOne({
-      $or: [{ email: admission.email }, { phone: admission.phone }]
-    });
 
-    if (!user) {
-      // Create User account (default password = phone number)
-      user = await User.create({
-        name: admission.studentName,
-        email: admission.email,
-        phone: admission.phone,
-        password: admission.phone, // default password
-        role: 'student',
-        status: 'active',
-        profileImage: admission.photo || ''
+    // -----------------------------------------------------
+    // Validate Batch If Provided
+    // -----------------------------------------------------
+
+    if (batch) {
+
+      await getValidBatchForCourse(
+        batch,
+        courseDoc._id
+      );
+
+    }
+
+
+    // -----------------------------------------------------
+    // Check Existing Pending Application
+    // -----------------------------------------------------
+
+    const existing =
+      await Admission.findOne({
+        $or: [
+          { phone },
+          {
+            email:
+              email.toLowerCase(),
+          },
+        ],
+        status: 'pending',
       });
-    } else if (user.role !== 'student') {
-      return next(new AppError('A user with this email/phone already exists with a different role.', 400));
+
+
+    if (existing) {
+      return next(
+        new AppError(
+          'You already have a pending application. Please wait for review.',
+          400
+        )
+      );
     }
 
-    // Generate unique Student ID
-    let studentId;
+
+    // -----------------------------------------------------
+    // Generate Unique Application ID
+    // -----------------------------------------------------
+
+    let applicationId;
     let isUnique = false;
+
+
     while (!isUnique) {
-      studentId = generateStudentId();
-      const exists = await Student.findOne({ studentId });
-      if (!exists) isUnique = true;
+
+      applicationId =
+        generateApplicationId();
+
+
+      const exists =
+        await Admission.findOne({
+          applicationId,
+        });
+
+
+      if (!exists) {
+        isUnique = true;
+      }
     }
 
-    // Check if student profile already exists
-    let student = await Student.findOne({ userId: user._id });
 
-    if (!student) {
-      student = await Student.create({
-        userId: user._id,
-        studentId,
-        name: admission.studentName,
-        fatherName: admission.fatherName,
-        motherName: admission.motherName,
-        dateOfBirth: admission.dateOfBirth,
-        gender: admission.gender,
-        phone: admission.phone,
-        email: admission.email,
-        address: admission.address,
-        education: admission.education,
-        course: admission.course._id,
-        batch: batchId,
-        photo: admission.photo || '',
-        status: 'active',
-        admissionDate: new Date()
+    // -----------------------------------------------------
+    // Create Admission
+    // -----------------------------------------------------
+
+    const admission =
+      await Admission.create({
+
+        applicationId,
+
+        studentName,
+
+        fatherName,
+
+        motherName,
+
+        dateOfBirth,
+
+        gender,
+
+        phone,
+
+        email:
+          email.toLowerCase(),
+
+        address,
+
+        education,
+
+        course:
+          courseDoc._id,
+
+        batch:
+          batch || undefined,
+
+        photo:
+          photo || '',
+
+        status:
+          'pending',
       });
 
-      // Increment batch student count
-      await Batch.findByIdAndUpdate(batchId, { $inc: { currentStudents: 1 } });
-    }
 
-    admission.status = 'approved';
-    admission.reviewedBy = req.user.id;
-    admission.reviewedAt = new Date();
-    admission.remarks = remarks || 'Application approved';
-    admission.batch = batchId;
-    await admission.save();
+    // -----------------------------------------------------
+    // Populate Course
+    // -----------------------------------------------------
 
-    return res.status(200).json({
+    await admission.populate(
+      'course',
+      'title slug'
+    );
+
+
+    // -----------------------------------------------------
+    // Response
+    // -----------------------------------------------------
+
+    return res.status(201).json({
+
       success: true,
-      message: 'Admission approved successfully. Student account created.',
+
+      message:
+        'Admission application submitted successfully!',
+
       data: {
-        admission,
-        student: {
-          studentId: student.studentId,
-          name: student.name,
-          defaultPassword: 'Phone number (ask student to change)'
-        }
-      }
+
+        applicationId:
+          admission.applicationId,
+
+        studentName:
+          admission.studentName,
+
+        course:
+          admission.course?.title,
+
+        status:
+          admission.status,
+
+        appliedAt:
+          admission.appliedAt,
+      },
     });
   }
+);
 
-  // ========== REJECT ==========
-  if (status === 'rejected') {
-    admission.status = 'rejected';
-    admission.reviewedBy = req.user.id;
-    admission.reviewedAt = new Date();
-    admission.remarks = remarks || 'Application rejected';
-    await admission.save();
+
+// =========================================================
+// ADMIN: GET ALL ADMISSIONS
+// =========================================================
+
+exports.getAllAdmissions = catchAsync(
+  async (req, res, next) => {
+
+    const features =
+      new APIFeatures(
+
+        Admission.find()
+
+          .populate(
+            'course',
+            'title slug'
+          )
+
+          .populate(
+            'batch',
+            'name time days status currentStudents maximumStudents teacher'
+          )
+
+          .populate(
+            'reviewedBy',
+            'name'
+          ),
+
+        req.query
+      )
+
+        .filter()
+
+        .search([
+          'studentName',
+          'phone',
+          'email',
+          'applicationId',
+        ])
+
+        .sort()
+
+        .paginate();
+
+
+    const admissions =
+      await features.query;
+
+
+    const total =
+      await Admission.countDocuments();
+
+
+    // -----------------------------------------------------
+    // Statistics
+    // -----------------------------------------------------
+
+    const pending =
+      await Admission.countDocuments({
+        status: 'pending',
+      });
+
+
+    const approved =
+      await Admission.countDocuments({
+        status: 'approved',
+      });
+
+
+    const rejected =
+      await Admission.countDocuments({
+        status: 'rejected',
+      });
+
+
+    // -----------------------------------------------------
+    // Response
+    // -----------------------------------------------------
 
     return res.status(200).json({
+
       success: true,
-      message: 'Admission application rejected.',
-      data: { admission }
+
+      results:
+        admissions.length,
+
+      total,
+
+      stats: {
+
+        pending,
+
+        approved,
+
+        rejected,
+      },
+
+      data: {
+
+        admissions,
+      },
     });
   }
+);
 
-  // ========== GENERAL UPDATE ==========
-  if (remarks !== undefined) admission.remarks = remarks;
-  if (batch) {
-    if (admission.status !== 'pending') {
-      return next(new AppError('Change the student batch from the Students module after an admission is processed.', 400));
+
+// =========================================================
+// ADMIN: GET SINGLE ADMISSION
+// =========================================================
+
+exports.getAdmission = catchAsync(
+  async (req, res, next) => {
+
+    const admission =
+      await Admission.findById(
+        req.params.id
+      )
+
+        .populate(
+          'course',
+          'title slug fee duration'
+        )
+
+        .populate(
+          'batch',
+          'name time days status currentStudents maximumStudents teacher'
+        )
+
+        .populate(
+          'reviewedBy',
+          'name email'
+        );
+
+
+    if (!admission) {
+
+      return next(
+        new AppError(
+          'Admission application not found.',
+          404
+        )
+      );
+
     }
-    await getValidBatchForCourse(batch, admission.course._id);
-    admission.batch = batch;
+
+
+    return res.status(200).json({
+
+      success: true,
+
+      data: {
+
+        admission,
+      },
+    });
   }
-  await admission.save();
+);
 
-  res.status(200).json({
-    success: true,
-    message: 'Admission updated successfully.',
-    data: { admission }
-  });
-});
 
-// ======================
-// ADMIN: Delete Admission
-// ======================
-exports.deleteAdmission = catchAsync(async (req, res, next) => {
-  const admission = await Admission.findByIdAndDelete(req.params.id);
+// =========================================================
+// ADMIN: GET AVAILABLE BATCHES FOR COURSE
+// =========================================================
+// GET /api/admissions/batches/:courseId
+//
+// এই endpoint শুধুমাত্র selected course-এর available
+// batchগুলো frontend-কে পাঠাবে.
+// =========================================================
 
-  if (!admission) {
-    return next(new AppError('Admission application not found.', 404));
+exports.getAdmissionBatches = catchAsync(
+  async (req, res, next) => {
+
+    const { courseId } =
+      req.params;
+
+
+    // -----------------------------------------------------
+    // Validate Course ID
+    // -----------------------------------------------------
+
+    if (!isValidObjectId(courseId)) {
+
+      return next(
+        new AppError(
+          'Invalid course ID.',
+          400
+        )
+      );
+
+    }
+
+
+    // -----------------------------------------------------
+    // Check Course Exists
+    // -----------------------------------------------------
+
+    const course =
+      await Course.findById(
+        courseId
+      );
+
+
+    if (!course) {
+
+      return next(
+        new AppError(
+          'Course not found.',
+          404
+        )
+      );
+
+    }
+
+
+    // -----------------------------------------------------
+    // Find Available Batches
+    // -----------------------------------------------------
+
+    const batches =
+      await Batch.find({
+
+        course:
+          courseId,
+
+        status: {
+          $in: [
+            'upcoming',
+            'ongoing',
+          ],
+        },
+
+        $expr: {
+          $lt: [
+            '$currentStudents',
+            '$maximumStudents',
+          ],
+        },
+
+      })
+
+        .populate(
+          'teacher',
+          'name email'
+        )
+
+        .sort({
+          startDate: 1,
+          createdAt: 1,
+        });
+
+
+    // -----------------------------------------------------
+    // Only batches with teacher
+    // -----------------------------------------------------
+
+    const availableBatches =
+      batches.filter(
+        (batch) =>
+          batch.teacher
+      );
+
+
+    // -----------------------------------------------------
+    // Response
+    // -----------------------------------------------------
+
+    return res.status(200).json({
+
+      success: true,
+
+      results:
+        availableBatches.length,
+
+      data: {
+
+        batches:
+          availableBatches,
+      },
+    });
   }
+);
 
-  res.status(200).json({
-    success: true,
-    message: 'Admission application deleted successfully.'
-  });
-});
+
+// =========================================================
+// ADMIN: UPDATE / APPROVE / REJECT
+// =========================================================
+
+exports.updateAdmission = catchAsync(
+  async (req, res, next) => {
+
+    const {
+      status,
+      remarks,
+      batch,
+    } = req.body;
+
+
+    // -----------------------------------------------------
+    // Find Admission
+    // -----------------------------------------------------
+
+    const admission =
+      await Admission.findById(
+        req.params.id
+      )
+
+        .populate(
+          'course',
+          'title slug fee duration'
+        );
+
+
+    if (!admission) {
+
+      return next(
+        new AppError(
+          'Admission application not found.',
+          404
+        )
+      );
+
+    }
+
+
+    // =====================================================
+    // ALREADY PROCESSED CHECK
+    // =====================================================
+
+    if (
+      admission.status !== 'pending' &&
+      status
+    ) {
+
+      return next(
+        new AppError(
+          `This application is already ${admission.status}.`,
+          400
+        )
+      );
+
+    }
+
+
+    // =====================================================
+    // APPROVE
+    // =====================================================
+
+    if (status === 'approved') {
+
+
+      // ---------------------------------------------------
+      // 1. Batch MUST be selected
+      // ---------------------------------------------------
+
+      if (!batch) {
+
+        return next(
+          new AppError(
+            'Please select a batch before approving this admission.',
+            400
+          )
+        );
+
+      }
+
+
+      // ---------------------------------------------------
+      // 2. Validate Selected Batch
+      // ---------------------------------------------------
+
+      let selectedBatch;
+
+
+      try {
+
+        selectedBatch =
+          await getValidBatchForCourse(
+            batch,
+            admission.course._id
+          );
+
+      } catch (error) {
+
+        return next(
+          new AppError(
+            error.message ||
+              'Selected batch is not available.',
+            error.statusCode || 400
+          )
+        );
+
+      }
+
+
+      // ---------------------------------------------------
+      // 3. Final Batch Check
+      // ---------------------------------------------------
+
+      if (!selectedBatch) {
+
+        return next(
+          new AppError(
+            'Selected batch was not found.',
+            404
+          )
+        );
+
+      }
+
+
+      // ---------------------------------------------------
+      // 4. Teacher Check
+      // ---------------------------------------------------
+
+      if (!selectedBatch.teacher) {
+
+        return next(
+          new AppError(
+            'Selected batch does not have a teacher assigned.',
+            400
+          )
+        );
+
+      }
+
+
+      // ---------------------------------------------------
+      // 5. Capacity Check
+      // ---------------------------------------------------
+
+      const currentStudents =
+        Number(
+          selectedBatch.currentStudents || 0
+        );
+
+
+      const maximumStudents =
+        Number(
+          selectedBatch.maximumStudents || 0
+        );
+
+
+      if (
+        maximumStudents > 0 &&
+        currentStudents >= maximumStudents
+      ) {
+
+        return next(
+          new AppError(
+            'Selected batch is already full. Please select another batch.',
+            400
+          )
+        );
+
+      }
+
+
+      // ===================================================
+      // USER CHECK
+      // ===================================================
+
+      let user =
+        await User.findOne({
+
+          $or: [
+
+            {
+              email:
+                admission.email,
+            },
+
+            {
+              phone:
+                admission.phone,
+            },
+
+          ],
+
+        });
+
+
+      // ---------------------------------------------------
+      // Existing User Role Check
+      // ---------------------------------------------------
+
+      if (
+        user &&
+        user.role !== 'student'
+      ) {
+
+        return next(
+          new AppError(
+            'A user with this email/phone already exists with a different role.',
+            400
+          )
+        );
+
+      }
+
+
+      // ===================================================
+      // EXISTING STUDENT CHECK
+      // ===================================================
+
+      let student =
+        user
+          ? await Student.findOne({
+              userId:
+                user._id,
+            })
+          : null;
+
+
+      if (student) {
+
+        return next(
+          new AppError(
+            'A student profile already exists for this admission/user.',
+            400
+          )
+        );
+
+      }
+
+
+      // ===================================================
+      // CREATE USER
+      // =====================================================
+
+      if (!user) {
+
+        user =
+          await User.create({
+
+            name:
+              admission.studentName,
+
+            email:
+              admission.email,
+
+            phone:
+              admission.phone,
+
+            password:
+              admission.phone,
+
+            role:
+              'student',
+
+            status:
+              'active',
+
+            profileImage:
+              admission.photo || '',
+          });
+
+      }
+
+
+      // ===================================================
+      // GENERATE STUDENT ID
+      // =====================================================
+
+      let studentId;
+
+      let studentIdUnique = false;
+
+
+      while (!studentIdUnique) {
+
+        studentId =
+          generateStudentId();
+
+
+        const exists =
+          await Student.findOne({
+            studentId,
+          });
+
+
+        if (!exists) {
+
+          studentIdUnique = true;
+
+        }
+
+      }
+
+
+      // ===================================================
+      // CREATE STUDENT
+      // =====================================================
+
+      student =
+        await Student.create({
+
+          userId:
+            user._id,
+
+          studentId,
+
+          name:
+            admission.studentName,
+
+          fatherName:
+            admission.fatherName,
+
+          motherName:
+            admission.motherName,
+
+          dateOfBirth:
+            admission.dateOfBirth,
+
+          gender:
+            admission.gender,
+
+          phone:
+            admission.phone,
+
+          email:
+            admission.email,
+
+          address:
+            admission.address,
+
+          education:
+            admission.education,
+
+          course:
+            admission.course._id,
+
+          // ⭐ ADMIN SELECTED BATCH
+          batch:
+            selectedBatch._id,
+
+          photo:
+            admission.photo || '',
+
+          status:
+            'active',
+
+          admissionDate:
+            new Date(),
+        });
+
+
+      // ===================================================
+      // INCREASE BATCH STUDENT COUNT
+      // =====================================================
+
+      await Batch.findByIdAndUpdate(
+
+        selectedBatch._id,
+
+        {
+          $inc: {
+            currentStudents: 1,
+          },
+        }
+
+      );
+
+
+      // ===================================================
+      // UPDATE ADMISSION
+      // =====================================================
+
+      admission.status =
+        'approved';
+
+
+      admission.reviewedBy =
+        req.user.id;
+
+
+      admission.reviewedAt =
+        new Date();
+
+
+      admission.remarks =
+        remarks ||
+        'Application approved';
+
+
+      // ⭐ Save Admin selected batch
+      admission.batch =
+        selectedBatch._id;
+
+
+      await admission.save();
+
+
+      // ===================================================
+      // RESPONSE
+      // =====================================================
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          'Admission approved successfully. Student account created.',
+
+        data: {
+
+          admission,
+
+          student: {
+
+            studentId:
+              student.studentId,
+
+            name:
+              student.name,
+
+            defaultPassword:
+              'Phone number (ask student to change)',
+
+            batch: {
+
+              id:
+                selectedBatch._id,
+
+              name:
+                selectedBatch.name,
+
+              time:
+                selectedBatch.time,
+
+              days:
+                selectedBatch.days,
+
+              status:
+                selectedBatch.status,
+
+              teacher:
+                selectedBatch.teacher?.name ||
+                '',
+            },
+
+          },
+
+        },
+
+      });
+
+    }
+
+
+    // =====================================================
+    // REJECT
+    // =====================================================
+
+    if (status === 'rejected') {
+
+      admission.status =
+        'rejected';
+
+
+      admission.reviewedBy =
+        req.user.id;
+
+
+      admission.reviewedAt =
+        new Date();
+
+
+      admission.remarks =
+        remarks ||
+        'Application rejected';
+
+
+      await admission.save();
+
+
+      return res.status(200).json({
+
+        success: true,
+
+        message:
+          'Admission application rejected.',
+
+        data: {
+
+          admission,
+        },
+
+      });
+
+    }
+
+
+    // =====================================================
+    // GENERAL UPDATE
+    // =====================================================
+
+    if (
+      remarks !== undefined
+    ) {
+
+      admission.remarks =
+        remarks;
+
+    }
+
+
+    // -----------------------------------------------------
+    // Update Batch While Pending
+    // -----------------------------------------------------
+
+    if (batch) {
+
+      if (
+        admission.status !== 'pending'
+      ) {
+
+        return next(
+          new AppError(
+            'Change the student batch from the Students module after an admission is processed.',
+            400
+          )
+        );
+
+      }
+
+
+      // Validate selected batch
+      await getValidBatchForCourse(
+        batch,
+        admission.course._id
+      );
+
+
+      admission.batch =
+        batch;
+
+    }
+
+
+    await admission.save();
+
+
+    return res.status(200).json({
+
+      success: true,
+
+      message:
+        'Admission updated successfully.',
+
+      data: {
+
+        admission,
+      },
+
+    });
+
+  }
+);
+
+
+// =========================================================
+// ADMIN: DELETE ADMISSION
+// =========================================================
+
+exports.deleteAdmission = catchAsync(
+  async (req, res, next) => {
+
+    const admission =
+      await Admission.findByIdAndDelete(
+        req.params.id
+      );
+
+
+    if (!admission) {
+
+      return next(
+        new AppError(
+          'Admission application not found.',
+          404
+        )
+      );
+
+    }
+
+
+    return res.status(200).json({
+
+      success: true,
+
+      message:
+        'Admission application deleted successfully.',
+
+    });
+
+  }
+);

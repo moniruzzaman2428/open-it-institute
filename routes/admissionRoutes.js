@@ -10,7 +10,10 @@ router.post('/', admissionController.createAdmission);
 // Admin only
 router.use(protect);
 router.use(restrictTo('admin'));
-
+router.get(
+  '/batches/:courseId',
+  admissionController.getAdmissionBatches
+);
 router.get('/', admissionController.getAllAdmissions);
 router.get('/:id', admissionController.getAdmission);
 router.patch('/:id', admissionController.updateAdmission);
