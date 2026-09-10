@@ -182,6 +182,23 @@ exports.getAllStudents = catchAsync(async (req, res, next) => {
   });
 });
 
+
+exports.getStudentInfo = catchAsync(async (req, res, next) => {
+  const students = await Student.find()
+    .select('studentId name course batch admissionDate status photo')
+    .populate('course', 'title name')
+    .populate('batch', 'name')
+    .sort({ name: 1 });
+
+  res.status(200).json({
+    success: true,
+    results: students.length,
+    data: {
+      students,
+    },
+  });
+});
+
 exports.getMyProfile = catchAsync(async (req, res, next) => {
   const student = await populateStudent(extractStudent(req));
 

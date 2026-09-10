@@ -10,7 +10,7 @@ router
   .route('/')
   .get(restrictTo('admin', 'teacher'), studentController.getAllStudents)
   .post(restrictTo('admin'), studentController.createStudent);
-
+router.get('/info', protect, studentController.getStudentInfo);
 // MUST be before /:id — otherwise "me" is parsed as an ObjectId
 router.get(
   '/me',
