@@ -184,21 +184,60 @@ exports.getAllStudents = catchAsync(async (req, res, next) => {
 
 
 exports.getStudentInfo = catchAsync(async (req, res, next) => {
-  const students = await Student.find()
-    .select('studentId name course batch admissionDate status photo')
-    .populate('course', 'title name')
-    .populate('batch', 'name')
-    .sort({ name: 1 });
+  const page = Math.max(Number(req.query.page) || 1, 1);
+
+  const limit = Math.min(
+    Math.max(Number(req.query.limit) || 12, 1),
+    50
+  );
+
+  const skip = (page - 1) * limit;
+
+  const filter = {};
+
+  // Status filter
+  if (req.query.status && req.query.status !== 'all') {
+    filter.status = req.query.status;
+  }
+
+  // Search filter
+  if (req.query.search?.trim()) {
+    const search = req.query.search.trim();
+
+    filter.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { studentId: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  const [students, total] = await Promise.all([
+    Student.find(filter)
+      .select(
+        'studentId name email phone course batch admissionDate status photo'
+      )
+      .populate('course', 'title name')
+      .populate('batch', 'name')
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit),
+
+    Student.countDocuments(filter),
+  ]);
 
   res.status(200).json({
     success: true,
     results: students.length,
     data: {
       students,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     },
   });
 });
-
 exports.getMyProfile = catchAsync(async (req, res, next) => {
   const student = await populateStudent(extractStudent(req));
 
