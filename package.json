@@ -34,10 +34,14 @@
     "mongoose": "^8.24.5",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.2",
+    "react-helmet-async": "^3.0.0",
     "sanitize-html": "^2.18.1",
     "slugify": "^1.6.9"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "allowScripts": {
+    "bcrypt@6.0.0": true
   }
 }
