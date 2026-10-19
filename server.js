@@ -13,10 +13,21 @@ const errorHandler = require('./middleware/errorHandler');
 // Load env vars
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-// Connect to MongoDB
-connectDB();
+
 
 const app = express();
+
+
+app.set('trust proxy', 1); // Vercel proxy-র পেছনে, rate-limit-এর জন্য দরকার
+
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Security middleware
 app.use(helmet());
@@ -42,7 +53,7 @@ app.use(cookieParser());
 app.use(
   cors({
     // origin: process.env.CLIENT_URL || 'http://localhost:5173/',
-    origin: 'https://openitinstitute-c8d2d.web.app',
+    origin: process.env.CLIENT_URL || 'https://openitinstitute-c8d2d.web.app',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -95,19 +106,17 @@ app.all('*', (req, res, next) => {
 
 // Global error handler
 app.use(errorHandler);
-
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION 💥', err.name, err.message);
-  server.close(() => {
-    process.exit(1);
+if (!process.env.VERCEL) {
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
   });
-});
+
+  process.on('unhandledRejection', (err) => {
+    console.error('UNHANDLED REJECTION 💥', err.name, err.message);
+    server.close(() => process.exit(1));
+  });
+}
 
 module.exports = app;
