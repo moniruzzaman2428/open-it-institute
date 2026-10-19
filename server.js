@@ -81,7 +81,7 @@ app.use('/api/gallery', require('./routes/galleryRoutes'));
 app.use('/api/testimonials', require('./routes/testimonialRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
 app.use('/api/settings', require('./routes/settingsRoutes'));
-
+app.use('/api/blogs', require('./routes/blogRoutes'));
 // ✅ IMPORTANT: Dashboard route যোগ করুন
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 
