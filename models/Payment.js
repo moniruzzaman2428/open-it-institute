@@ -29,7 +29,7 @@ const paymentSchema = new mongoose.Schema(
     receiptNumber: {
       type: String,
       required: true,
-      unique: true
+      unique: true // 🟢 Automatically creates the unique index
     },
     paymentDate: {
       type: Date,
@@ -67,8 +67,8 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
+// Keep these compound and sorting indexes
 paymentSchema.index({ student: 1, course: 1 });
-paymentSchema.index({ receiptNumber: 1 });
 paymentSchema.index({ paymentDate: -1 });
 
 module.exports = mongoose.model('Payment', paymentSchema);

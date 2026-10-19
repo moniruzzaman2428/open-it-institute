@@ -11,7 +11,7 @@ const studentSchema = new mongoose.Schema(
     studentId: {
       type: String,
       required: true,
-      unique: true,
+      unique: true, // 🟢 This automatically creates the index for you
       uppercase: true,
       trim: true
     },
@@ -90,7 +90,6 @@ const studentSchema = new mongoose.Schema(
 );
 
 // Indexes for search & filter
-studentSchema.index({ studentId: 1 });
 studentSchema.index({ name: 'text', phone: 'text', email: 'text' });
 studentSchema.index({ course: 1, batch: 1, status: 1 });
 

@@ -42,7 +42,7 @@ app.use(cookieParser());
 app.use(
   cors({
     // origin: process.env.CLIENT_URL || 'http://localhost:5173/',
-    origin: process.env.CLIENT_URL || 'https://openitinstitute-c8d2d.web.app/',
+    origin: 'https://openitinstitute-c8d2d.web.app',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']

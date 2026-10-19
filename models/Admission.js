@@ -90,7 +90,6 @@ const admissionSchema = new mongoose.Schema(
   }
 );
 
-admissionSchema.index({ applicationId: 1 });
 admissionSchema.index({ status: 1 });
 admissionSchema.index({ phone: 1, email: 1 });
 

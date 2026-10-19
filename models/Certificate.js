@@ -5,13 +5,13 @@ const certificateSchema = new mongoose.Schema(
     certificateId: {
       type: String,
       required: true,
-      unique: true,
+      unique: true, // 🟢 Automatically creates a unique index
       uppercase: true
     },
     verificationCode: {
       type: String,
       required: true,
-      unique: true
+      unique: true // 🟢 Automatically creates a unique index
     },
     student: {
       type: mongoose.Schema.Types.ObjectId,
@@ -50,8 +50,7 @@ const certificateSchema = new mongoose.Schema(
   }
 );
 
-certificateSchema.index({ certificateId: 1 });
-certificateSchema.index({ verificationCode: 1 });
+// Keep this one! Compound indexes must be declared explicitly at the schema level.
 certificateSchema.index({ student: 1, course: 1 });
 
 module.exports = mongoose.model('Certificate', certificateSchema);
